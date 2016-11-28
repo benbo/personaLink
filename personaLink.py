@@ -17,12 +17,12 @@ def main(argv):
 
 	if t=='train':
 
-		gt = d+"/16_9_matches_j.txt"
+		gt = d+"/17_4_matches_training.json"
 
-		f1 = d+"/usersAFiltered.txt"
-		f2 = d+"/usersBFiltered.txt"
-		f3 = d+"/postsAFiltered.txt"
-		f4 = d+"/postsBFiltered.txt"
+		f1 = d+"/usersFiltered17_training.json"
+		f2 = d+"/usersFiltered14_training.json"
+		f3 = d+"/postsFiltered17_training.json"
+		f4 = d+"/postsFiltered14_training.json"
 		init(f1, f2, f3, f4 )
 		X_pos = gen_pos_pairs(gt)
 		X_neg = gen_all_neg_pairs(gt, False)
