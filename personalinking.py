@@ -1,3 +1,9 @@
+import editdistance
+import ujson
+import ftfy
+import random
+import itertools
+
 usrsA  = None
 usrsB  = None
 postsA = None
@@ -19,7 +25,6 @@ def init(f_usrsA, f_usrsB, f_postsA, f_postsB):
 
 def txt_dict(filename):
      
-    import ujson
     #test loading the file, printing sample contents
     with open(filename,'r') as fp:
         temp = ujson.load(fp);
@@ -35,18 +40,23 @@ def collapse_data(data):
     
     users = {}
     
-    
     for item in data:
-        
-        user = users.get(item['userName'], None)
-        
-        if user != None:
-       
-            user['groupName'].add(item['groupName'])    
+        if item[u'userName'] in users:
+            user = users[item[u'userName']]
+            if isinstance(item['groupName'],list):
+                for name in item['groupName']:
+                    if not name is None:
+                        user['groupName'].add(name)
+            else:
+                user['groupName'].add(item['groupName'])    
+
             if item['imageName'] is not None:
-         
-        
-                user['image'].add( (item['imageName'],item['imageHeight'],item['imageWidth'],item['imageType'],item['imageSize']))
+                if isinstance(item['imageName'],list):
+                    for l in zip(item['imageName'],item['imageHeight'],item['imageWidth'],item[u'imageMimeType'],item['imageSize']):
+                        if not l[0] is None:
+                            user['image'].add(l)
+                else:
+                    user['image'].add( (item['imageName'],item['imageHeight'],item['imageWidth'],item[u'imageMimeType'],item['imageSize']))
     
             fieldName = item.get('userProfileFieldName', None)
             
@@ -54,36 +64,48 @@ def collapse_data(data):
             
                 user[fieldName] = item['userProfileFieldValue']
     
-    
         else:
         
             user = item['userName']
         
-            users[user] = {}
-        
-            users[user]['groupName'] = set([item['groupName']])
+            users[user] = item.copy()
+            if isinstance(item['groupName'],list):
+                users[user]['groupName'] = set( [name for name in item['groupName'] if not name is None] )
+            else:
+                users[user]['groupName'] = set([item['groupName']])
             
-            users[user]['registrationTime']= item['registrationTime']
+            if isinstance(item['registrationTime'],list):
+                users[user]['registrationTime']= min(item['registrationTime'])
+            else:
+                users[user]['registrationTime']= item['registrationTime']
             
             if item['imageName'] is not None:
-            
-            
-                users[user]['image']= set( [(item['imageName'],item['imageHeight'],item['imageWidth'],item['imageType'],item['imageSize'])] ) 
-                
-                
+                if isinstance(item['imageName'],list):
+                    users[user]['image']= set( [l for l in zip(item['imageName'],item['imageHeight'],item['imageWidth'],item[u'imageMimeType'],item['imageSize']) if not l[0] is None])
+                else:
+                    users[user]['image']= set( [(item['imageName'],item['imageHeight'],item['imageWidth'],item[u'imageMimeType'],item['imageSize'])] ) 
             else:
-                
                 users[user]['image'] =set([])
+
+            if isinstance(item['Signature'],list):
+                users[user]['Signature'] = u' '.join(item['Signature'])
+            else:
+                users[user]['Signature'] = item['Signature']
         
     return users
 
 
 # In[3]:
 
-def usr_bow(posts):
+def usr_bow(tmp):
     
+    if isinstance(tmp,list):
+        posts = tmp
+    else:
+        posts = [ val for key,value in tmp.iteritems() for val in value]
+
     posts_bow = {}
-    
+   
     for post in posts:
     
         if posts_bow.get(post['userName'], None) == None:
@@ -139,26 +161,12 @@ def check_exist(usrA, usrB, usrsA, usrsB, postsA, postsB, ):
 # In[4]:
 
 
-def gen_pos_pairs(filename):
+def gen_pos_pairs(data_gt,keya='site_a',keyb='site_b'):
 
     global usrsA
     global usrsB
     global postsA
     global postsB
-
-    import ujson
-    import ftfy
-
-    with open(filename, 'rb') as f:
-        data = f.readlines()
-
-    data = map(lambda x: x.rstrip(), data)
-
-    # convert to array of JSON objects
-    data_json_str = "[" + ','.join(data) + "]"
-
-    # load it
-    data_gt = ujson.loads(data_json_str)
 
     X = []
     
@@ -166,21 +174,16 @@ def gen_pos_pairs(filename):
         
         if pair['class'] == 1:
             
-            usr1 = pair['site_a']
+            usr1 = pair[keya]
             
-            usr2 = pair['site_b']
+            usr2 = pair[keyb]
             
            # if not check_exist(usr1, usr2, usrsA, usrsB, postsA, postsB):
                 
             #    continue
-            
-            
             if usr2 == u'Ghost\u2122':
-                
                 usr2 = "GhostTM"
-                
             if usr2 == u'nicklan&lt;b&gt;&lt;/b&gt;':
-                
                 usr2 = u'nicklan<b></b>'
             
             #X.append(featurise(usr1, usr2,  postsA, postsB, usrsA, usrsB))
@@ -191,18 +194,14 @@ def gen_pos_pairs(filename):
 
 # In[5]:
 
-def gen_neg_pairs(filename):
+def gen_neg_pairs(filename,keya='site_a',keyb='site_b'):
 
     global usrsA
     global usrsB
     global postsA
     global postsB
     
-    import ujson
-    import ftfy
     
-    import random
-
     with open(filename, 'rb') as f:
         data = f.readlines()
 
@@ -224,7 +223,7 @@ def gen_neg_pairs(filename):
         
         if pair['class'] == 1:
             
-            pos.append((pair['site_a'],pair['site_b']))
+            pos.append((pair[keya],pair[keyb]))
             
     for i in range(len(data_gt)):
         
@@ -244,15 +243,12 @@ def gen_neg_pairs(filename):
 
 
 
-def gen_all_neg_pairs(filename, evl=False):
+def gen_all_neg_pairs(data_gt, evl=False,keya='site_a',keyb='site_b'):
 
     global usrsA
     global usrsB
     global postsA
     global postsB
-    
-    import ujson
-    import ftfy
     
     import random
 
@@ -262,17 +258,6 @@ def gen_all_neg_pairs(filename, evl=False):
 
     else:
 
-        with open(filename, 'rb') as f:
-            data = f.readlines()
-
-        data = map(lambda x: x.rstrip(), data)
-
-    # convert to array of JSON objects
-        data_json_str = "[" + ','.join(data) + "]"
-
-    # load it
-        data_gt = ujson.loads(data_json_str)
-
         X = []
     
         pos = []
@@ -281,7 +266,7 @@ def gen_all_neg_pairs(filename, evl=False):
         
             if pair['class'] == 1:
             
-                pos.append((pair['site_a'],pair['site_b']))
+                pos.append((pair[keya],pair[keyb]))
             
     targets = []
     print "HERE GOES NOTHING"        
@@ -303,7 +288,7 @@ def gen_all_neg_pairs(filename, evl=False):
     print len(targets)        
     from multiprocessing import Pool
     
-    p = Pool(33)
+    p = Pool(40)
     
     X = p.map(featurise, targets, chunksize=10000 )
     
@@ -484,77 +469,44 @@ def post_time(usr1, usr2, postsA, postsB, usrsA, usrsB):
     
     
 
-    
-        
-def featurise(usrs):
-
+def feature_gen(usrs):
         global usrsA
         global usrsB
         global postsA
         global postsB
     
         usr1 = usrs[0]
-        
         usr2 = usrs[1]
         
-        import editdistance
-
-
-        vector = []
-
-
         #feature1 : editDist between usernames
-
-
         username1 = usr1
-
         username2 = usr2
-
         ft1 = editdistance.eval(usr1, usr2)
-
-        vector.append(int(ft1))
-
+        yield int(ft1)
 
         #feature2 : editDist between lowercase usernames
-
         ft2 = editdistance.eval(usr1.lower(), usr2.lower())
-
-        vector.append(int(ft2))
-
+        yield int(ft2)
 
         if len(usr1) > len(usr2):
-
                 norm = len(usr1)
-
         else:
-
                 norm = len(usr2)
 
         ft1 = float(ft1)/norm
-
         ft2 = float(ft2)/norm
 
-        vector.append(ft1)
-
-        vector.append(ft2)
+        yield ft1
+        yield ft2
 
         #feature3 : timediff between user     
-
-        ft3 =  abs(usrsA[usr1]['registrationTime'] - usrsB[usr2]['registrationTime'])
-
-        vector.append(int(ft3))
+        yield int(abs(usrsA[usr1]['registrationTime'] - usrsB[usr2]['registrationTime']))
 
         #feature4: TimeZone
-
         if usrsA[usr1]['Time Zone'] == usrsB[usr2]['Time Zone']:
-
-            ft4 = 1
-
+            yield 1
         else:
-
-            ft4 = 0
-
-        vector.append(ft4)
+            yield 0
 
         #text Features
 
@@ -562,35 +514,30 @@ def featurise(usrs):
 
         if (postsA.get(usr1, None) != None) and (postsB.get(usr2, None) != None):
 
+            for sc in indi_scores(postsA[usr1]['body'],postsB[usr2]['body']):
+                yield sc
 
-            ft5 = indi_scores(postsA[usr1]['body'],postsB[usr2]['body'])
+            for sc in indi_scores(postsA[usr1]['subject'],postsB[usr2]['subject']):
+                yield sc
 
-            ft5 = ft5 + indi_scores(postsA[usr1]['subject'],postsB[usr2]['subject'])
+            for sc in indi_scores(postsA[usr1]['title'],postsB[usr2]['title']):
+                yield sc
 
-            ft5 = ft5 + indi_scores(postsA[usr1]['title'],postsB[usr2]['title'])
+            for sc in overall_scores(postsA[usr1]['body'],postsB[usr2]['body']):
+                yield sc
 
-            vector += ft5    
+            for sc in overall_scores(postsA[usr1]['subject'],postsB[usr2]['subject']):
+                yield sc
 
+            for sc in overall_scores(postsA[usr1]['title'],postsB[usr2]['title']):
+                yield sc
 
-
-            ft6 = overall_scores(postsA[usr1]['body'],postsB[usr2]['body'])
-
-            ft6 = ft6 + overall_scores(postsA[usr1]['subject'],postsB[usr2]['subject'])
-
-            ft6 = ft6 + overall_scores(postsA[usr1]['title'],postsB[usr2]['title'])
-
-
-            vector += ft6 
-
-            vector += post_time( usr1, usr2, postsA, postsB, usrsA, usrsB )         
+            for sc in post_time( usr1, usr2, postsA, postsB, usrsA, usrsB ):
+                yield sc
 
         else:
-
-            vector += [-1 for i in range(18)]
-
-            vector +=[-1 for i in range(6)]
-
-            vector +=[-1 for i in range(3)]
+            for sc in xrange(27):
+                yield -1
 
         #feature7: Group Affliations
 
@@ -608,10 +555,7 @@ def featurise(usrs):
 
                     n+=1
 
-        ft7 = n
-
-        vector.append(ft7)
-
+        yield n
 
         #feature8: Signatures
 
@@ -624,7 +568,6 @@ def featurise(usrs):
         ft9 = -1
 
         if (sig1!=None) and (sig2!=None):
-
             sig1 = replace_punct(sig1).lower().split()
 
             sig2 = replace_punct(sig2).lower().split()
@@ -642,9 +585,8 @@ def featurise(usrs):
 
             ft9 = get_cosine(sig1, sig2)
 
-        vector.append(ft8)
-
-        vector.append(ft9)
+        yield ft8
+        yield ft9
 
         #feature9: image
         
@@ -661,42 +603,24 @@ def featurise(usrs):
             ft10 = len(image1&image2  )
             ft11 = len(image1^image2  )
         
-        vector.append(ft10)
-        vector.append(ft11)       
+        yield ft10
+        yield ft11
         
-        ft12 = -1
         #feature10: IM
-        
-        
         
         im1 = getIM(usrsA[usr1])
         im2 = getIM(usrsB[usr2])
 
-        ft12 = len(im1&im2)
-        ft13 = len(im1^im2)
+        yield len(im1&im2)
+        yield len(im1^im2)
+
         
-        vector.append(ft12)
-        vector.append(ft13)
-
-    
-
-        return vector
+def featurise(usrs):
+        return [x for x in feature_gen(usrs)]
 
 def getIM(ft):
-    
-    l =[]
-    
-    l.append(ft.get('AOL IM', None))
-    l.append(ft.get('ICQ', None))
-    l.append(ft.get('Yahoo! IM', None))
-    l.append(ft.get('MSN IM', None))
-    l.append(ft.get( 'Skype', None))
-    
-    l = [item for item in l if item is not None ] 
-    
-    return set( l)
-
-
+    l = [ft[x] for x in ['AOL IM',u'Jabber','ICQ','Yahoo! IM','MSN IM','Skype'] if x in ft] 
+    return set(list(itertools.chain(*[x for x in l if not x is None])))
         
 def check_feat(key, d):
     

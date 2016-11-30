@@ -1,5 +1,9 @@
 # personaLink
 Package to perform persona linking (MEMEX 16 CP2)
+
+#Dependencies
+`$ pip install --user ftfy editdistance ujson`
+
 #Usage
 ###Training Data
 `$ python personaLink.py train <folder with data> <output file>`
