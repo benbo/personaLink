@@ -1,15 +1,18 @@
 import editdistance
+from collections import Counter
 import ujson
 import ftfy
 import random
 import itertools
+import numpy as np
+import math
+import string
+import re
 
 usrsA  = None
 usrsB  = None
 postsA = None
 postsB = None
-
-
 
 def init(f_usrsA, f_usrsB, f_postsA, f_postsB):
 
@@ -17,11 +20,17 @@ def init(f_usrsA, f_usrsB, f_postsA, f_postsB):
     global usrsB
     global postsA
     global postsB
+    global regex
+    regex = re.compile('[%s]' % re.escape(string.punctuation))
 
     usrsA = collapse_data(txt_dict(f_usrsA))
+    preprocess_users(usrsA)
     usrsB = collapse_data(txt_dict(f_usrsB))
+    preprocess_users(usrsB)
     postsA = usr_bow(txt_dict(f_postsA))
     postsB = usr_bow(txt_dict(f_postsB))
+    preprocess_posts(postsA)
+    preprocess_posts(postsB)
 
 def txt_dict(filename):
      
@@ -33,6 +42,15 @@ def txt_dict(filename):
     #print repr(temp1[1]).decode("unicode-escape")
     return temp
 
+def preprocess_users(usrs):
+    for key,item in usrs.iteritems():
+        sig1 = item.get("Signature", None)
+        if not sig1 is None:
+            sig1 = replace_punct(sig1).lower().split()
+            item['ssig'] = set(sig1)
+            item['sig_tv'] = text_to_vector(sig1)
+        im1 = getIM(item)
+        item['getIM'] = im1
 
 # In[2]:
 
@@ -160,6 +178,23 @@ def check_exist(usrA, usrB, usrsA, usrsB, postsA, postsB, ):
 
 # In[4]:
 
+def gen_pair_pairs(data_gt,keya='site_a',keyb='site_b'):
+
+    global usrsA
+    global usrsB
+    global postsA
+    global postsB
+
+    X = []
+    
+    for pair in data_gt:
+            usr1 = pair[keya]
+            
+            usr2 = pair[keyb]
+            
+            X.append(featurise((usr1, usr2) ))
+    return X
+
 
 def gen_pos_pairs(data_gt,keya='site_a',keyb='site_b'):
 
@@ -250,8 +285,6 @@ def gen_all_neg_pairs(data_gt, evl=False,keya='site_a',keyb='site_b'):
     global postsA
     global postsB
     
-    import random
-
     if evl:
 
         pos = []
@@ -290,7 +323,7 @@ def gen_all_neg_pairs(data_gt, evl=False,keya='site_a',keyb='site_b'):
     
     p = Pool(40)
     
-    X = p.map(featurise, targets, chunksize=10000 )
+    X = p.map(featurise, targets)#, chunksize=10000 )
     
     p.close()
     p.join()
@@ -300,8 +333,6 @@ def gen_all_neg_pairs(data_gt, evl=False,keya='site_a',keyb='site_b'):
                          
                          
 def text_to_vector(text):
-    
-    from collections import Counter
     return Counter(text)
 
 
@@ -309,13 +340,11 @@ def text_to_vector(text):
 
 def get_cosine(vec1, vec2):
     
-    import math
-    
     intersection = set(vec1.keys()) & set(vec2.keys())
     numerator = sum([vec1[x] * vec2[x] for x in intersection])
 
-    sum1 = sum([vec1[x]**2 for x in vec1.keys()])
-    sum2 = sum([vec2[x]**2 for x in vec2.keys()])
+    sum1 = sum([x**2 for x in vec1.values()])
+    sum2 = sum([x**2 for x in vec2.values()])
     denominator = math.sqrt(sum1) * math.sqrt(sum2)
 
     if not denominator:
@@ -326,8 +355,6 @@ def get_cosine(vec1, vec2):
 
 def replace_punct(st):
     
-    import string
-    import re
 
     
     regex = re.compile('[%s]' % re.escape(string.punctuation))
@@ -335,52 +362,45 @@ def replace_punct(st):
     
     return out
 
-def indi_scores(l1, l2):
-    
-    import numpy as np
-    
-    l1_t = []
-    
-    l2_t = []
-    
-    
-    for item in l1:
-        
-        l1_t.append(set(replace_punct(item).lower().split()))
-    
-    for item in l2:
-        
-        l2_t.append(set(replace_punct(item).lower().split()))
+def preprocess_posts(postdict):
+    for key,item in postdict.iteritems():
+        item['bodyset'] = [ set(replace_punct(x).lower().split()) for x in item['body']]
+        item['subjectset'] = [ set(replace_punct(x).lower().split()) for x in item['subject']]
+        item['titleset'] = [ set(replace_punct(x).lower().split()) for x in item['title']]
+        item['bodyvec'] = [ text_to_vector(replace_punct(x).lower().split()) for x in item['body']]
+        item['subjectvec'] = [ text_to_vector(replace_punct(x).lower().split()) for x in item['subject']]
+        item['titlevec'] = [ text_to_vector(replace_punct(x).lower().split()) for x in item['title']]
 
-    l1 = l1_t
-    
-    l2 = l2_t
+        item['bodyset_compl'] = frozenset().union(*item['bodyset'])
+        item['subjectset_compl'] = frozenset().union(*item['subjectset'])
+        item['titleset_compl'] = frozenset().union(*item['titleset'])
+
+        item['bodyvec_compl'] = text_to_vector(list(itertools.chain(*[replace_punct(x).lower().split() for x in item['body']])))
+        item['subjectvec_compl'] = text_to_vector(list(itertools.chain(*[replace_punct(x).lower().split() for x in item['subject']])))
+        item['titlevec_compl'] = text_to_vector(list(itertools.chain(*[replace_punct(x).lower().split() for x in item['title']])))
         
-    
-    scores_jac = []
-    
-    scores_cs = []
-    
-    
+def gen_jac(l1,l2):
     for item in l1:
-        
         for item2 in l2:
-            
             if len(item|item2) == 0:
-                scores_jac.append(0)
+                yield 0.0
             else:
-                scores_jac.append(  float(len(item&item2))/float((len(item|item2))) )   
+                 yield float(len(item&item2))/(len(item|item2)) 
+
+def gen_cos(v1,v2):
+    for vec1 in v1:
+        for vec2 in v2:
+            yield get_cosine(vec1, vec2)
+
+def indi_scores(l1, l2, v1, v2):
     
-            vec1 = text_to_vector(item)
-            vec2 = text_to_vector(item2)
+    scores_jac = np.array([x for x in gen_jac(l1,l2)])
     
-            scores_cs.append(get_cosine(vec1, vec2))
+    scores_cs = np.array([ x for x in gen_cos(v1,v2)])
     
-    cs_feats = [ min(scores_cs), max(scores_cs), np.mean(scores_cs)     ]
+    cs_feats = [ scores_cs.min(), scores_cs.max(), scores_cs.mean() ]
     
-    
-    
-    jac_feats = [ min(scores_jac), max(scores_jac), np.mean(scores_cs)]
+    jac_feats = [scores_jac.min(), scores_jac.max(), scores_jac.mean()]
     
     return cs_feats + jac_feats 
 
@@ -390,38 +410,20 @@ def indi_scores(l1, l2):
 
 
 
-def overall_scores(l1, l2):
+def overall_scores(item, item2,v1,v2):
     
-    
-    vec = []
-    
-    item = set()
-    
-    item2 = set()
-    
-    for it in l1:
-        
-        item |= set(replace_punct(it).lower().split())
-        
-    for it in l2:
-    
-        item2 |= set(replace_punct(it).lower().split())
-        
-    
-    
+     
     if len(item|item2) == 0:
             
-        vec.append(0)
+        s1 = 0.0
         
     else:
-        vec.append(  float(len(item&item2))/float((len(item|item2))) )   
+        s1 = float(len(item&item2))/(len(item|item2)) 
 
-    vec1 = text_to_vector(item)
-    vec2 = text_to_vector(item2)
     
-    vec.append(get_cosine(vec1, vec2))
+    s2 = get_cosine(v1, v2)
         
-    return vec
+    return s1,s2
 
 def post_freq(time):
     
@@ -433,39 +435,19 @@ def post_freq(time):
 
 def post_std(time):
     
-    import numpy as np
-    
     return np.std(time)
 
 def post_mn(time):
-    
-    import numpy as np
     
     return np.mean(time)
 
 def post_time(usr1, usr2, postsA, postsB, usrsA, usrsB):
     
-    vector = []
+    time1 = [int(post) for post in postsA[usr1]['postTime'] ]
     
-    time1 = []
-    
-    time2 = []
-    
-    for post in postsA[usr1]['postTime']:
-        
-        time1.append(int(post))
-        
-    for post in postsB[usr2]['postTime']:
-        
-        time2.append(int(post))
-        
-    vector.append( abs(post_std(time1) - post_std(time2 ) ) )
-                      
-    vector.append(abs(post_freq(time1) - post_freq(time2) ))
+    time2 = [int(post) for post in postsB[usr2]['postTime'] ]
                   
-    vector.append(abs( post_mn(time1) - post_mn(time2)  )) 
-                  
-    return vector
+    return abs(post_std(time1) - post_std(time2 ) ),abs(post_freq(time1) - post_freq(time2) ),abs( post_mn(time1) - post_mn(time2)  )
     
     
 
@@ -477,34 +459,35 @@ def feature_gen(usrs):
     
         usr1 = usrs[0]
         usr2 = usrs[1]
-        
+        yield usr1.encode('utf-8')
+        yield usr2.encode('utf-8')
         #feature1 : editDist between usernames
         username1 = usr1
         username2 = usr2
-        ft1 = editdistance.eval(usr1, usr2)
-        yield int(ft1)
+        #ft1 = editdistance.eval(usr1, usr2)
+        #yield int(ft1)
 
         #feature2 : editDist between lowercase usernames
-        ft2 = editdistance.eval(usr1.lower(), usr2.lower())
-        yield int(ft2)
+        #ft2 = editdistance.eval(usr1.lower(), usr2.lower())
+        #yield int(ft2)
 
-        if len(usr1) > len(usr2):
-                norm = len(usr1)
-        else:
-                norm = len(usr2)
+        #if len(usr1) > len(usr2):
+        #        norm = len(usr1)
+        #else:
+        #        norm = len(usr2)
 
-        ft1 = float(ft1)/norm
-        ft2 = float(ft2)/norm
+        #ft1 = float(ft1)/norm
+        #ft2 = float(ft2)/norm
 
-        yield ft1
-        yield ft2
+        #yield ft1
+        #yield ft2
 
         #feature3 : timediff between user     
-        yield int(abs(usrsA[usr1]['registrationTime'] - usrsB[usr2]['registrationTime']))
+        yield int(abs(usrsA[usr1]['registrationTime'] - usrsB[usr2]['registrationTime']))#0
 
         #feature4: TimeZone
         if usrsA[usr1]['Time Zone'] == usrsB[usr2]['Time Zone']:
-            yield 1
+            yield 1#1
         else:
             yield 0
 
@@ -514,26 +497,26 @@ def feature_gen(usrs):
 
         if (postsA.get(usr1, None) != None) and (postsB.get(usr2, None) != None):
 
-            for sc in indi_scores(postsA[usr1]['body'],postsB[usr2]['body']):
-                yield sc
+            for sc in indi_scores(postsA[usr1]['bodyset'],postsB[usr2]['bodyset'],postsA[usr1]['bodyvec'],postsB[usr2]['bodyvec']):
+                yield sc#2,3,4,5,6,7
 
-            for sc in indi_scores(postsA[usr1]['subject'],postsB[usr2]['subject']):
-                yield sc
+            for sc in indi_scores(postsA[usr1]['subjectset'],postsB[usr2]['subjectset'],postsA[usr1]['subjectvec'],postsB[usr2]['subjectvec']):
+                yield sc#8,9,10,11,12,13
 
-            for sc in indi_scores(postsA[usr1]['title'],postsB[usr2]['title']):
-                yield sc
+            for sc in indi_scores(postsA[usr1]['titleset'],postsB[usr2]['titleset'],postsA[usr1]['titlevec'],postsB[usr2]['titlevec']):
+                yield sc#14,15,16,17,18,19
 
-            for sc in overall_scores(postsA[usr1]['body'],postsB[usr2]['body']):
-                yield sc
+            for sc in overall_scores(postsA[usr1]['bodyset_compl'],postsB[usr2]['bodyset_compl'],postsA[usr1]['bodyvec_compl'],postsB[usr2]['bodyvec_compl']):
+                yield sc#20,21
 
-            for sc in overall_scores(postsA[usr1]['subject'],postsB[usr2]['subject']):
-                yield sc
+            for sc in overall_scores(postsA[usr1]['subjectset_compl'],postsB[usr2]['subjectset_compl'],postsA[usr1]['subjectvec_compl'],postsB[usr2]['subjectvec_compl']):
+                yield sc#22,23
 
-            for sc in overall_scores(postsA[usr1]['title'],postsB[usr2]['title']):
-                yield sc
+            for sc in overall_scores(postsA[usr1]['titleset_compl'],postsB[usr2]['titleset_compl'],postsA[usr1]['titlevec_compl'],postsB[usr2]['titlevec_compl']):
+                yield sc#24,25
 
             for sc in post_time( usr1, usr2, postsA, postsB, usrsA, usrsB ):
-                yield sc
+                yield sc#26,27,28
 
         else:
             for sc in xrange(27):
@@ -555,38 +538,25 @@ def feature_gen(usrs):
 
                     n+=1
 
-        yield n
+        yield n#29
 
         #feature8: Signatures
-
-        sig1 = usrsA[usr1].get("Signature", None)
-
-        sig2 = usrsB[usr2].get("Signature", None)
 
         ft8 = -1
 
         ft9 = -1
 
-        if (sig1!=None) and (sig2!=None):
-            sig1 = replace_punct(sig1).lower().split()
+        if ('ssig' in usrsA[usr1]) and ('ssig' in usrsB[usr2]):
+            ssig1 = usrsA[usr1]['ssig']
 
-            sig2 = replace_punct(sig2).lower().split()
-
-            ssig1 = set(sig1)
-
-            ssig2 = set(sig2)
-
+            ssig2 = usrsB[usr2]['ssig']
 
             ft8 = float(len(ssig1&ssig2))/float((len(ssig1|ssig2)))
 
-            sig1 = text_to_vector(sig1)
+            ft9 = get_cosine(usrsA[usr1]['sig_tv'], usrsB[usr2]['sig_tv'])
 
-            sig2 = text_to_vector(sig2)
-
-            ft9 = get_cosine(sig1, sig2)
-
-        yield ft8
-        yield ft9
+        yield ft8#30
+        yield ft9#31
 
         #feature9: image
         
@@ -603,13 +573,13 @@ def feature_gen(usrs):
             ft10 = len(image1&image2  )
             ft11 = len(image1^image2  )
         
-        yield ft10
-        yield ft11
+        yield ft10#32
+        yield ft11#33
         
         #feature10: IM
         
-        im1 = getIM(usrsA[usr1])
-        im2 = getIM(usrsB[usr2])
+        im1 = usrsA[usr1]['getIM']
+        im2 = usrsB[usr2]['getIM']
 
         yield len(im1&im2)
         yield len(im1^im2)
